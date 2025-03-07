@@ -1,0 +1,42 @@
+let
+    // Access the CSV file from the provided URL
+    Source = try Csv.Document(
+        Web.Contents("https://documentation.meraki.com/@api/deki/files/28413/Meraki_End_of_Sale_Product_Summary.csv"),
+        [Delimiter = ",", Columns = 6, Encoding = 65001, QuoteStyle = QuoteStyle.None]
+    ) otherwise null,
+
+    // If the source is null, return an empty table to avoid failure during refresh
+    CsvSource = if Source <> null then Source else #table({"Product", "EOS PID", "Announcement Date", "End-of-Sale Date", "End-of-Support Date", "Replacement Product"}, {}),
+
+    // Promote headers if the CSV was successfully loaded
+    #"Promoted Headers" = Table.PromoteHeaders(CsvSource, [PromoteAllScalars = true]),
+
+    // Change column types for the data
+    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers", 
+        {
+            {"Product", type text}, 
+            {"EOS PID", type text}, 
+            {"Announcement Date", type date}, 
+            {"End-of-Sale Date", type date}, 
+            {"End-of-Support Date", type text}, 
+            {"Replacement Product", type text}
+        }
+    ),
+
+    // Sort rows by 'EOS PID'
+    #"Sorted Rows" = Table.Sort(#"Changed Type", {{"EOS PID", Order.Ascending}}),
+
+    // Duplicate 'EOS PID' column
+    #"Duplicated Column" = Table.DuplicateColumn(#"Sorted Rows", "EOS PID", "EOS PID - Copy"),
+
+    // Extract text before the delimiter "-HW"
+    #"Extracted Text Before Delimiter" = Table.TransformColumns(#"Duplicated Column", 
+        {{"EOS PID - Copy", each Text.BeforeDelimiter(_, "-HW"), type text}}
+    ),
+
+    // Rename the extracted column for clarity
+    #"Renamed Columns" = Table.RenameColumns(#"Extracted Text Before Delimiter", 
+        {{"EOS PID - Copy", "EOS PID - Extracted"}}
+    )
+in
+    #"Renamed Columns"
