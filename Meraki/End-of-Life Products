@@ -1,0 +1,39 @@
+let
+    // Access the webpage source for Meraki End-of-Life products
+    Source = try Web.Contents("https://documentation.meraki.com/General_Administration/Other_Topics/Meraki_End-of-Life_(EOL)_Products_and_Dates") 
+        otherwise null,
+
+    // If the source is null (failed access), return an empty table to avoid failure in scheduled refresh
+    HtmlSource = if Source <> null then Text.FromBinary(Source) else "",
+
+    // Extract the table from the HTML content
+    #"Extracted Table From Html" = if HtmlSource <> "" then
+        Html.Table(HtmlSource, 
+            {
+                {"Product", "TABLE > * > TR > :nth-child(1)"},
+                {"Announcement", "TABLE > * > TR > :nth-child(2)"},
+                {"End-of-Sale Date", "TABLE > * > TR > :nth-child(3)"},
+                {"End-of-Support Date", "TABLE > * > TR > :nth-child(4)"}
+            }, 
+            [RowSelector="TABLE > * > TR"]
+        ) 
+    else 
+        #table({"Product", "Announcement", "End-of-Sale Date", "End-of-Support Date"}, {}),
+
+    // Promote headers to use the first row for column names
+    #"Promoted Headers" = Table.PromoteHeaders(#"Extracted Table From Html", [PromoteAllScalars=true]),
+
+    // Change column types for the table
+    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers", 
+        {
+            {"Product", type text}, 
+            {"Announcement", type date}, 
+            {"End-of-Sale Date", type date}, 
+            {"End-of-Support Date", type text}
+        }
+    ),
+
+    // Sort rows by the 'Product' column
+    #"Sorted Rows" = Table.Sort(#"Changed Type", {{"Product", Order.Ascending}})
+in
+    #"Sorted Rows"
