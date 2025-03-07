@@ -1,0 +1,42 @@
+let
+    // Define the base URL for API requests
+    BaseUrl = MerakiBaseUrl,
+
+    // Define a parameterized function to fetch switch port statuses for a single serial number
+    FetchSwitchPortStatuses = (Serial as text) =>
+        let
+            RelativePath = "devices/" & Serial & "/switch/ports/statuses",  // Relative path for the endpoint
+            PortsResponse = try Json.Document(Web.Contents(BaseUrl, 
+                [
+                    RelativePath = RelativePath,  // Use RelativePath to create a static path
+                    Headers = [#"X-Cisco-Meraki-API-Key" = ApiKeyMeraki]
+                ]))
+        in
+            if PortsResponse[HasError] then
+                error PortsResponse[Error]  // Return the error for investigation
+            else
+                PortsResponse[Value],  // Return the data if no error
+               
+    // Source table containing device information
+    Source = devices,
+
+    // Filter rows to include only devices of type 'switch'
+    #"Filtered Rows" = Table.SelectRows(Source, each ([productType] = "switch")),
+
+    // Add a column with switch port statuses by applying the parameterized function
+    #"Added SwitchPortsStatus Column" = Table.AddColumn(#"Filtered Rows", "SwitchPortsStatus", each FetchSwitchPortStatuses([serial])),
+
+    // Expand the SwitchPortsStatus column into a list
+    #"Expanded SwitchPortsStatus" = Table.ExpandListColumn(#"Added SwitchPortsStatus Column", "SwitchPortsStatus"),
+
+    // Expand the fields from the SwitchPortsStatus column
+    #"Expanded SwitchPortsStatus1" = Table.ExpandRecordColumn(#"Expanded SwitchPortsStatus", "SwitchPortsStatus", 
+        {"portId", "name", "status", "enabled", "type", "poeEnabled", "vlan", "voiceVlan", "linkNegotiation"}, 
+        {"SwitchPortsStatus.portId", "SwitchPortsStatus.name", "SwitchPortsStatus.status", "SwitchPortsStatus.enabled", 
+         "SwitchPortsStatus.type", "SwitchPortsStatus.poeEnabled", "SwitchPortsStatus.vlan", "SwitchPortsStatus.voiceVlan", 
+         "SwitchPortsStatus.linkNegotiation"}),
+
+    // Final filter step to ensure the desired rows are included
+    #"Filtered Rows1" = Table.SelectRows(#"Expanded SwitchPortsStatus1", each true)
+in
+    #"Filtered Rows1"
