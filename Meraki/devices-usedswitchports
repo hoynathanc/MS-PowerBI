@@ -1,0 +1,72 @@
+let
+    // Source table containing device information
+    Source = devices,
+
+    // Filter rows to include only devices of type 'switch'
+    #"Filtered Rows" = Table.SelectRows(Source, each ([productType] = "switch")),
+
+    // Get list of serial numbers from the filtered rows
+    SerialList = Table.Column(#"Filtered Rows", "serial"),
+
+    // Define the base URL for API requests
+    BaseUrl = MerakiBaseUrl,
+
+    // Securely reference the API key via a parameter or credential
+    ApiKey = ApiKeyMeraki,  // Use a parameter or reference Data Source Credentials for the API Key
+
+    // Define a function to fetch client data based on serial number
+    FetchSwitchPortActivity = (Serial as text) =>
+        let
+            // Define the relative path and query parameters
+            RelativePath = "/devices/" & Serial & "/clients",  // Use static relative path
+            QueryParams = [timespan = "604800"],  // Query parameter for the timespan (last 7 days)
+            
+            // Make the API request using the relative path
+            ActivityResponse = try Json.Document(Web.Contents(BaseUrl, 
+                [
+                    RelativePath = RelativePath,  // Static path usage
+                    Query = QueryParams,
+                    Headers = [#"X-Cisco-Meraki-API-Key" = ApiKey]
+                ])) 
+                otherwise null
+        in
+            ActivityResponse,
+
+    // Add a column with 'SwitchPortActivity' data for each serial number
+    #"Added SwitchPortActivity" = Table.AddColumn(#"Filtered Rows", "SwitchPortActivity", each FetchSwitchPortActivity([serial])),
+
+    // Expand the 'SwitchPortActivity' column into individual records
+    #"Expanded SwitchPortActivity" = Table.ExpandListColumn(#"Added SwitchPortActivity", "SwitchPortActivity"),
+
+    // Expand additional details from the SwitchPortActivity list
+    #"Expanded SwitchPortActivity1" = Table.ExpandRecordColumn(#"Expanded SwitchPortActivity", "SwitchPortActivity", 
+        {"id", "mac", "description", "mdnsName", "dhcpHostname", "user", "ip", "vlan", "namedVlan", "switchport", 
+         "adaptivePolicyGroup", "usage"}, 
+        {"SwitchPortActivity.id", "SwitchPortActivity.mac", "SwitchPortActivity.description", "SwitchPortActivity.mdnsName", 
+         "SwitchPortActivity.dhcpHostname", "SwitchPortActivity.user", "SwitchPortActivity.ip", "SwitchPortActivity.vlan", 
+         "SwitchPortActivity.namedVlan", "SwitchPortActivity.switchport", "SwitchPortActivity.adaptivePolicyGroup", 
+         "SwitchPortActivity.usage"}),
+
+    // Sort the data by 'name'
+    #"Sorted Rows1" = Table.Sort(#"Expanded SwitchPortActivity1",{{"name", Order.Ascending}}),
+
+    // Group the data by 'name' and 'switchport'
+    #"Grouped Rows" = Table.Group(#"Sorted Rows1", {"name", "SwitchPortActivity.switchport"}, 
+        {{"Count", each Table.RowCount(_), Int64.Type}}),
+
+    // Filter out rows where 'SwitchPortActivity.switchport' is null
+    #"Filtered Rows1" = Table.SelectRows(#"Grouped Rows", each ([SwitchPortActivity.switchport] <> null)),
+
+    // Remove errors from 'SwitchPortActivity.switchport'
+    #"Removed Errors" = Table.RemoveRowsWithErrors(#"Filtered Rows1", {"SwitchPortActivity.switchport"}),
+
+    // Change the type of 'Count' and 'SwitchPortActivity.switchport' columns
+    #"Changed Type" = Table.TransformColumnTypes(#"Removed Errors",{{"Count", Int64.Type}, {"SwitchPortActivity.switchport", Int64.Type}}),
+
+    // Sort rows again by 'name'
+    #"Sorted Rows" = Table.Sort(#"Changed Type",{{"name", Order.Ascending}}),
+
+    // Remove errors from 'SwitchPortActivity.switchport' again
+    #"Removed Errors1" = Table.RemoveRowsWithErrors(#"Sorted Rows", {"SwitchPortActivity.switchport"})
+in
+    #"Removed Errors1"
