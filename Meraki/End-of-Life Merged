@@ -1,0 +1,7 @@
+let
+    Source = Table.NestedJoin(devices, {"model"}, Meraki_End_of_Sale_Product_Summary, {"EOS PID - Extracted"}, "Meraki_End_of_Sale_Product_Summary", JoinKind.LeftOuter),
+    #"Expanded Meraki_End_of_Sale_Product_Summary" = Table.ExpandTableColumn(Source, "Meraki_End_of_Sale_Product_Summary", {"Product", "EOS PID", "Announcement Date", "End-of-Sale Date", "End-of-Support Date", "Replacement Product", "EOS PID - Extracted"}, {"Meraki_End_of_Sale_Product_Summary.Product", "Meraki_End_of_Sale_Product_Summary.EOS PID", "Meraki_End_of_Sale_Product_Summary.Announcement Date", "Meraki_End_of_Sale_Product_Summary.End-of-Sale Date", "Meraki_End_of_Sale_Product_Summary.End-of-Support Date", "Meraki_End_of_Sale_Product_Summary.Replacement Product", "Meraki_End_of_Sale_Product_Summary.EOS PID - Extracted"}),
+    #"Removed Columns" = Table.RemoveColumns(#"Expanded Meraki_End_of_Sale_Product_Summary",{"details"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Removed Columns",{{"Meraki_End_of_Sale_Product_Summary.End-of-Support Date", type date}})
+in
+    #"Changed Type"
