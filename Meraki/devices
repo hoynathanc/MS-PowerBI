@@ -1,0 +1,7 @@
+let
+    Source = Json.Document(Web.Contents("https://api.meraki.com/api/v1/organizations/<orgid>/devices", [Headers=[#"X-Cisco-Meraki-API-Key"= ApiKeyMeraki]])),
+    #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Expanded Column1" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", {"name", "serial", "mac", "networkId", "productType", "model", "address", "lat", "lng", "notes", "tags", "lanIp", "configurationUpdatedAt", "firmware", "url", "details"}, {"name", "serial", "mac", "networkId", "productType", "model", "address", "lat", "lng", "notes", "tags", "lanIp", "configurationUpdatedAt", "firmware", "url", "details"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded Column1",{{"model", type text}})
+in
+    #"Changed Type"
