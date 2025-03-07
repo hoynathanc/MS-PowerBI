@@ -1,0 +1,48 @@
+let
+    // Source table containing device information
+    Source = devices,
+
+    // Filter rows to include only devices of type 'switch'
+    #"Filtered Rows" = Table.SelectRows(Source, each ([productType] = "switch")),
+
+    // Create a parameterized function to fetch API data for a single serial number with error handling
+    FetchSwitchPorts = (Serial as text) =>
+        let
+            BaseUrl = MerakiBaseUrl,
+            RelativePath = "devices/" & Serial & "/switch/ports", // Relative path for API call
+            ApiResponse = try Json.Document(Web.Contents(BaseUrl, 
+                [
+                    RelativePath = RelativePath,  // Use RelativePath to create a static path
+                    Headers = [#"X-Cisco-Meraki-API-Key" = ApiKeyMeraki]
+                ])) 
+                otherwise null
+        in
+            ApiResponse,
+
+    // Add a column with switch port data by applying the parameterized function
+    #"Added SwitchPorts Column" = Table.AddColumn(#"Filtered Rows", "SwitchPorts", each try FetchSwitchPorts([serial]) otherwise null),
+
+    // Remove rows where SwitchPorts data could not be retrieved (null values)
+    #"Removed Null Rows" = Table.SelectRows(#"Added SwitchPorts Column", each [SwitchPorts] <> null),
+
+    // Expand the SwitchPorts column into a list
+    #"Expanded SwitchPorts" = Table.ExpandListColumn(#"Removed Null Rows", "SwitchPorts"),
+
+    // Expand additional details from the SwitchPorts list
+    #"Expanded SwitchPorts1" = Table.ExpandRecordColumn(#"Expanded SwitchPorts", "SwitchPorts", 
+        {"portId", "name", "tags", "enabled", "poeEnabled", "type", "vlan", "voiceVlan", "allowedVlans", "isolationEnabled", 
+         "rstpEnabled", "stpGuard", "linkNegotiation", "portScheduleId", "schedule", "udld", "linkNegotiationCapabilities", 
+         "flexibleStackingEnabled", "accessPolicyType", "daiTrusted", "profile", "module", "mirror"}, 
+        {"SwitchPorts.portId", "SwitchPorts.name", "SwitchPorts.tags", "SwitchPorts.enabled", "SwitchPorts.poeEnabled", "SwitchPorts.type", 
+         "SwitchPorts.vlan", "SwitchPorts.voiceVlan", "SwitchPorts.allowedVlans", "SwitchPorts.isolationEnabled", "SwitchPorts.rstpEnabled", 
+         "SwitchPorts.stpGuard", "SwitchPorts.linkNegotiation", "SwitchPorts.portScheduleId", "SwitchPorts.schedule", "SwitchPorts.udld", 
+         "SwitchPorts.linkNegotiationCapabilities", "SwitchPorts.flexibleStackingEnabled", "SwitchPorts.accessPolicyType", 
+         "SwitchPorts.daiTrusted", "SwitchPorts.profile", "SwitchPorts.module", "SwitchPorts.mirror"}),
+
+    // Change the type of portId column to Int64
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded SwitchPorts1", {{"SwitchPorts.portId", Int64.Type}}),
+
+    // Final filter step to ensure the desired rows are included
+    #"Filtered Rows1" = Table.SelectRows(#"Changed Type", each true)
+in
+    #"Filtered Rows1"
