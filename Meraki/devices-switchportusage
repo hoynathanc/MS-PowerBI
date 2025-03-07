@@ -1,0 +1,95 @@
+let
+    // Source table containing device information
+    Source = devices,
+
+    // Filter rows to include only devices of type 'switch'
+    #"Filtered Rows" = Table.SelectRows(Source, each ([productType] = "switch")),
+
+    // Get list of serial numbers from the filtered rows
+    SerialList = Table.Column(#"Filtered Rows", "serial"),
+
+    // Define the base URL for API requests
+    BaseUrl = MerakiBaseUrl,
+
+    // Securely reference the API key
+    ApiKey = ApiKeyMeraki,  // Set this parameter securely in Power BI
+
+    // Define a function to fetch client data for each serial number
+    FetchClientData = (Serial as text) =>
+        let
+            RelativePath = "/devices/" & Serial & "/clients",  // Relative path for static path usage
+            QueryOptions = [
+                Query = [timespan = "604800"],  // Query parameter for the timespan (1 week)
+                Headers = [#"X-Cisco-Meraki-API-Key" = ApiKey]
+            ],
+            ClientsResponse = try Json.Document(Web.Contents(BaseUrl, 
+                [
+                    RelativePath = RelativePath,  // Use RelativePath for static path
+                    Query = QueryOptions[Query],
+                    Headers = QueryOptions[Headers]
+                ])) 
+                otherwise null
+        in
+            ClientsResponse,
+
+    // Make API requests for all serial numbers and fetch client data
+    SerialResponses = List.Transform(SerialList, each FetchClientData(_)),
+
+    // Convert the list of responses into a table
+    ResponseTable = Table.FromList(SerialResponses, Splitter.SplitByNothing(), {"Response"}),
+
+    // Expand the response column into individual fields
+    #"Expanded Responses" = Table.ExpandListColumn(ResponseTable, "Response"),
+    #"Expanded Columns" = Table.ExpandRecordColumn(#"Expanded Responses", "Response",
+        {"id", "description", "mac", "ip", "vlan", "switchport", "usage", "status"},
+        {"id", "description", "mac", "ip", "vlan", "switchport", "usage", "status"}),
+
+    // Expand usage data within the client info
+    #"Expanded usage" = Table.ExpandRecordColumn(#"Expanded Columns", "usage", {"sent", "recv"}, {"usage.sent", "usage.recv"}),
+
+    // Add the 'SwitchPortActivity' column directly using inline logic for each serial number
+    #"Added SwitchPortActivity" = Table.AddColumn(#"Filtered Rows", "SwitchPortActivity", each
+        let
+            Serial = [serial],
+            RelativePath = "/devices/" & Serial & "/clients",  // Relative path for static path usage
+            QueryOptions = [
+                Query = [timespan = "604800"],  // Query parameter for the timespan (1 week)
+                Headers = [#"X-Cisco-Meraki-API-Key" = ApiKey]
+            ],
+            ActivityResponse = try Json.Document(Web.Contents(BaseUrl, 
+                [
+                    RelativePath = RelativePath,  // Use RelativePath for static path
+                    Query = QueryOptions[Query],
+                    Headers = QueryOptions[Headers]
+                ])) 
+                otherwise null
+        in
+            ActivityResponse
+    ),
+
+    // Expand the 'SwitchPortActivity' column
+    #"Expanded SwitchPortActivity" = Table.ExpandListColumn(#"Added SwitchPortActivity", "SwitchPortActivity"),
+
+    // Expand additional details from the SwitchPortActivity list
+    #"Expanded SwitchPortActivity1" = Table.ExpandRecordColumn(#"Expanded SwitchPortActivity", "SwitchPortActivity", 
+        {"id", "mac", "description", "mdnsName", "dhcpHostname", "user", "ip", "vlan", "namedVlan", "switchport", 
+         "adaptivePolicyGroup", "usage"}, 
+        {"SwitchPortActivity.id", "SwitchPortActivity.mac", "SwitchPortActivity.description", "SwitchPortActivity.mdnsName", 
+         "SwitchPortActivity.dhcpHostname", "SwitchPortActivity.user", "SwitchPortActivity.ip", "SwitchPortActivity.vlan", 
+         "SwitchPortActivity.namedVlan", "SwitchPortActivity.switchport", "SwitchPortActivity.adaptivePolicyGroup", 
+         "SwitchPortActivity.usage"}),
+
+    // Group the data by 'name' and 'switchport'
+    #"Grouped Rows" = Table.Group(#"Expanded SwitchPortActivity1", {"name", "SwitchPortActivity.switchport"}, 
+        {{"Count", each Table.RowCount(_), Int64.Type}}),
+
+    // Change the type of 'switchport' column to Int64
+    #"Changed Type" = Table.TransformColumnTypes(#"Grouped Rows",{{"SwitchPortActivity.switchport", Int64.Type}}),
+
+    // Sort the rows by 'name' and 'switchport'
+    #"Sorted Rows" = Table.Sort(#"Changed Type",{{"name", Order.Ascending}, {"SwitchPortActivity.switchport", Order.Ascending}}),
+
+    // Group by 'name' and count the ports used in the last 7 days
+    #"Grouped Rows1" = Table.Group(#"Sorted Rows", {"name"}, {{"PortsUsedLast7Days", each Table.RowCount(_), Int64.Type}})
+in
+    #"Grouped Rows1"
